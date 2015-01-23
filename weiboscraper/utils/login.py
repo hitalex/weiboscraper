@@ -107,6 +107,8 @@ class WeiboLogin(object):
             result = urllib2.urlopen(req)
             text = result.read()
             
+            """
+            # login code from cola
             # Fix for new login changed since about 2014-3-28
             ajax_url_regex = re.compile('location\.replace\(\'(.*)\'\)')
             matches = ajax_url_regex.search(text)
@@ -120,9 +122,20 @@ class WeiboLogin(object):
             if result is False and 'reason' in json_data:
                 return result, json_data['reason']
             return result
+            """
+            
+            ajax_url_regex = re.compile('location\.replace\(\'(.*)\'\)')
+            matches = ajax_url_regex.search(text)
+            p = re.compile('location\.replace\([\'|"](.*?)[\'|"]\)')
+            if matches is not None:
+                ajax_url = matches.group(1) # 返回登录url
+                return ajax_url
+            else:
+                return None
+
         except Exception as e:
             print e
-            return False
+            return None
             
 if __name__ == '__main__':
     login = WeiboLogin('cola_weibo8@163.com', '31415926')

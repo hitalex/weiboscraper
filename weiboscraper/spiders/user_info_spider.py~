@@ -3,30 +3,45 @@
 """
 The parser code is borrowed from : https://github.com/chineking/cola/blob/master/contrib/weibo/parsers.py
 """
+import re
+import json
 
 import scrapy
 import pymongo
+from scrapy import Request
+from scrapy import log
+from scrapy.shell import inspect_response
 
 from utils import beautiful_soup
 from weiboscraper.items import UserInfoItem
 from weiboscraper.settings import USER_NAME, USER_PASS
 from weiboscraper.utils.login import WeiboLogin
 
+re_UserInfo = re.compile(r'^http://weibo.com/(\d+)/info')
+re_UserPIDPage = re.compile(r'^http://weibo.com/p/(\d+)/')
+re_UserNamePage = re.compile(r'^http://weibo.com/u/(\d+)/') # 如果用户设定了个性域名，则会跳转到个性域名
+re_Site = re.compile(r'^http://weibo.com/(.*)')
+
+re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
+re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
+
 class UserInfoSpider(scrapy.Spider):
+    name = 'userinfo'
     allowed_domains = ["weibo.com"]
-    start_urls = [
-        "http://weibo.com/2887339314/info", # 吴军博士
-    ]
     
-    def __init__(self, name, **kwargs):
+    def __init__(self, **kwargs):
         self.logined = False
-        super(WeiboSearchSpider, self).__init__(name, **kwargs)
+        super(UserInfoSpider, self).__init__(**kwargs)
+        # 设置登录类
+        self.login = WeiboLogin(username=USER_NAME, passwd=USER_PASS)
+        # 开始抓取的uid列表
+        self.start_uids = ['1663072851']
         
-        # 登录网站
-        login = WeiboLogin(username=USER_NAME, passwd=USER_PASS)
-        result = login.login()
-        if result:
-            self.logined = True
+        #scrapy.log.start()
+        
+        login_url = self.login.login()
+        if login_url:
+            self.start_urls.append(login_url)
         else:
             print 'Logg in error'
     
@@ -44,26 +59,126 @@ class UserInfoSpider(scrapy.Spider):
             if dest_url.startswith('http://weibo.com/sorry?usernotexists'):
                 self.bundle.exists = False
                 return False
-                
             #return False
             
         return True 
-        
         
     def check_page(self, response):
         url = 'http://weibo.com/'
         request = response.request.replace(url=url, method='get', callback=self.parse_item)
         return request
         
-    def parse(self, response): # 默认的回调函数
+    def parse(self, response):
+        """ 处理登录url，保存cookie信息，默认的回调处理函数
+        """
+        #import ipdb; ipdb.set_trace()
+        text = response.body
+        regex = re.compile('\((.*)\)')
+        data = json.loads(regex.search(text).group(1))
+        userinfo = data.get('userinfo', '')
+        log.msg('json data: %s' % data, level=log.INFO)
+        if data['result'] == True:
+            self.logined = True
+                        
+            url = 'http://weibo.com/%s/info/' % (self.start_uids[0])
+            meta = {'uid': self.start_uids[0]}
+            request = Request(url=url, callback=self.parse_user_info, meta = meta)
+            yield request
+            
+        else:
+            self.log('login failed: errno=%s, reason=%s' % (data.get('errno', ''), data.get('reason', '')))
+            
+    def parse_org_info(self, response):
+        """ 抽取组织主页的信息
+        """
+        user_info_item = UserInfoItem()
+        user_info_item['is_org'] = True
+        user_info_item['uid'] = response.meta['uid']
+        
+        #import ipdb; ipdb.set_trace()
+        # find user name
+        # 发生了跳转，则意味着该帐号有个性域名
+        m = re_UserNamePage.search(response.url)
+        if m != None:
+            user_info_item['username'] = user_info_item['uid']
+        else:
+            m = re_Site.search(response.url)
+            user_info_item['username'] = m.group(1)
+            
+        soup = beautiful_soup(response.body)
+        for script in soup.find_all('script'):
+            text = script.text
+            if text.startswith('FM.view'):
+                text = text.strip().replace(';', '').replace('FM.view(', '')[:-1]
+                data = json.loads(text)
+                domid = data['domid']
+                if domid.startswith('Pl_Core_T8CustomTriColumn__'):
+                    info_soup = beautiful_soup(data['html'])
+                    td_list = info_soup.find_all('td', attrs = {'class':'S_line1'})
+                    if len(td_list) != 3:
+                        log.msg('Error parsing: %s' % response.url)
+                    else:
+                        user_info_item['n_follows'] = int(td_list[0].find('strong').text.strip())
+                        user_info_item['n_fans'] = int(td_list[1].find('strong').text.strip())
+                        
+                elif domid.startswith('Pl_Core_UserInfo__'):
+                    info_soup = beautiful_soup(data['html'])
+                    user_info_item['nickname'] = info_soup.find('p', attrs={'class':'info'}).find('span').text.strip()
+                    ul_list = info_soup.find('ul', attrs={'class':'ul_detail'})
+                    li_list = ul_list.find_all('li', attrs={'class':'item S_line2 clearfix'})
+                    if len(li_list) == 0:
+                        log.msg('Error parsing: %s' % response.url)
+                    else:
+                        user_info_item['category'] = li_list[0].find('span', attrs={'class':'item_text W_fl'}).text.strip()
+                        if len(li_list) > 1:
+                            user_info_item['intro'] = li_list[1].find('span', attrs={'class':'item_text W_fl'}).text.strip()
+                    
+                else:
+                    pass
+        
+        print user_info_item
+        import ipdb; ipdb.set_trace()
+        
+        yield user_info_item
+        
+    def parse_user_info(self, response): # 默认的回调函数
+        """ 普通用户信息抓取，例如：
+        """
+        log.msg('Parse url: %s' % response.url, level=log.INFO)
+        #log.msg('Response body: %s' % response.body)
+        
+        # 如果是组织页面，那么会返回错误页面
+        if response.url.find('pagenotfound') > 0:
+            # 匹配源request
+            #import ipdb; ipdb.set_trace()
+            log.msg('Page not found: %s' % response.url, log.ERROR)
+            uid = response.meta['uid']
+            new_url = 'http://weibo.com/u/%s' % (uid) # 直接访问组织帐号的首页
+            request = Request(url=new_url, callback=self.parse_org_info, meta={'uid':uid})
+            yield request
+        
         # 从用户的信息页面抽取user info
         user_info_item = UserInfoItem()
+        user_info_item['is_org'] = False
+        
+        # 从原始返回的页面中抽取uid和page_id
+        m = re_UID.search(response.body)
+        if m != None:
+            user_info_item['uid'] = m.group(1)
+        else:
+            log.msg('Error parsing uid: %s' % response.url, log.ERROR)
+            
+        # 抽取page_id
+        m = re_PAGEID.search(response.body)
+        if m != None:
+            user_info_item['page_id'] = m.group(1)
+        else:
+            log.msg('Error parsing page id: %s' % response.url, log.ERROR)
         
         # bs4解析
-        soup = beautiful_soup(response)
+        soup = beautiful_soup(response.body)
         
         new_style = False
-        
         profile_div = None
         career_div = None
         edu_div = None
@@ -103,24 +218,37 @@ class UserInfoSpider(scrapy.Spider):
                             tags_div = inner_div
                 elif domid == 'Pl_Official_Header__1':
                     header_soup = beautiful_soup(data['html'])
-                    user_info_item.avatar = header_soup.find('div', attrs={'class': 'pf_head_pic'})\
+                    user_info_item['avatar'] = header_soup.find('div', attrs={'class': 'pf_head_pic'})\
                                                 .find('img')['src']
-                    user_info_item.n_follows = int(header_soup.find('ul', attrs={'class': 'user_atten'})\
+                    user_info_item['n_follows'] = int(header_soup.find('ul', attrs={'class': 'user_atten'})\
                                                     .find('strong', attrs={'node-type': 'follow'}).text)
-                    user_info_item.n_fans = int(header_soup.find('ul', attrs={'class': 'user_atten'})\
+                    user_info_item['n_fans'] = int(header_soup.find('ul', attrs={'class': 'user_atten'})\
                                                  .find('strong', attrs={'node-type': 'fans'}).text)
                 elif domid.startswith('Pl_Core_T8CustomTriColumn__'):
                     # new style friends info
                     header_soup = beautiful_soup(data['html'])
                     tds = header_soup.find('table', attrs={'class': 'tb_counter'})\
                                                 .find_all('td')
-                    user_info_item.n_follows = int(tds[0].find('strong').text)
-                    user_info_item.n_fans = int(tds[1].find('strong').text)
+                    user_info_item['n_follows'] = int(tds[0].find('strong').text)
+                    user_info_item['n_fans'] = int(tds[1].find('strong').text)
                 elif domid.startswith('Pl_Official_Headerv6__'):
                     # new style avatar info
                     header_soup = beautiful_soup(data['html'])
-                    user_info_item.avatar = header_soup.find('p', attrs='photo_wrap')\
+                    user_info_item['avatar'] = header_soup.find('p', attrs='photo_wrap')\
                                                 .find('img')['src']
+                    
+                    #import ipdb; ipdb.set_trace()
+                    # 判别该用户是否是认真用户
+                    photo_div = header_soup.find_all('div', attrs={'class':'pf_photo', 'node-type':'photo'})
+                    if len(photo_div) > 0:
+                        result = photo_div[0].find_all('a', attrs={'href':'http://verified.weibo.com/verify'})
+                        if len(result) > 0:
+                            user_info_item['is_verified'] = True
+                        else:
+                            user_info_item['is_verified'] = False
+                    else:
+                        log.msg('Can not find photo div: %s' % response.url, log.ERROR)
+                    
             elif 'STK' in text:
                 text = text.replace('STK && STK.pageletM && STK.pageletM.view(', '')[:-1]
                 data = json.loads(text)
@@ -135,7 +263,7 @@ class UserInfoSpider(scrapy.Spider):
                     tags_div = beautiful_soup(data['html'])
                 elif pid == 'pl_profile_photo':
                     soup = beautiful_soup(data['html'])
-                    user_info_item.avatar = soup.find('img')['src']
+                    user_info_item['avatar'] = soup.find('img')['src']
         
         profile_map = {
             u'昵称': {'field': 'nickname'},
@@ -173,9 +301,10 @@ class UserInfoSpider(scrapy.Spider):
                             if 'func' not in profile_map[k] \
                             else profile_map[k]['func']
                     v = func(v)
-                    setattr(user_info_item, profile_map[k]['field'], v)
+                    user_info_item[profile_map[k]['field']] = v
+                    #setattr(user_info_item, profile_map[k]['field'], v)
                 
-        user_info_item.work = []
+        user_info_item['work'] = []
         if career_div is not None:
             if not new_style:
                 for div in career_div.find_all(attrs={'class': 'con'}):
@@ -196,7 +325,7 @@ class UserInfoSpider(scrapy.Spider):
                                 work_info.position = text.split(u'：', 1)[1]
                             else:
                                 work_info.detail = text
-                    user_info_item.work.append(work_info)
+                    user_info_item['work'].append(work_info)
             else:
                 li = career_div.find('li', attrs={'class': 'li_1'})
                 for span in li.find_all('span', attrs={'class': 'pt_detail'}):
@@ -227,9 +356,9 @@ class UserInfoSpider(scrapy.Spider):
                                                     .replace('\t', '')\
                                                     .strip()
                     
-                    user_info_item.work.append(work_info)
+                    user_info_item['work'].append(work_info)
             
-        user_info_item.edu = []
+        user_info_item['edu'] = []
         if edu_div is not None:
             if not new_style:
                 for div in edu_div.find_all(attrs={'class': 'con'}):
@@ -244,7 +373,7 @@ class UserInfoSpider(scrapy.Spider):
                                 edu_info.date = text.strip().split('(')[1].strip().strip(')')
                         else:
                             edu_info.detail = text
-                    user_info_item.edu.append(edu_info)
+                    user_info_item['edu'].append(edu_info)
             else:
                 span = edu_div.find('li', attrs={'class': 'li_1'})\
                                 .find('span', attrs={'class': 'pt_detail'})
@@ -273,18 +402,22 @@ class UserInfoSpider(scrapy.Spider):
                     text = text[end_pos:]
                     edu_info.detail = t.replace('\r', '').replace('\n', '')\
                                         .replace('\t', '').strip()
-                    user_info_item.edu.append(edu_info)
+                    user_info_item['edu'].append(edu_info)
                     
-        user_info_item.tags = []
+        user_info_item['tags'] = []
         if tags_div is not None:
             if not new_style:
                 for div in tags_div.find_all(attrs={'class': 'con'}):
                     for a in div.find_all('a'):
-                        user_info_item.tags.append(a.text)
+                        user_info_item['tags'].append(a.text)
             else:
                 for a in tags_div.find('span', attrs={'class': 'pt_detail'}).find_all('a'):
-                    user_info_item.tags.append(a.text.strip())
+                    user_info_item['tags'].append(a.text.strip())
                 
         
-#         self.logger.debug('parse %s finish' % url)
-        return user_info_item
+        log.msg('parse %s finish' % response.url, log.INFO)
+        print user_info_item
+        yield user_info_item
+
+if __name__ == '__main__':
+    spider = UserInfoSpider()
