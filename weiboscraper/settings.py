@@ -13,8 +13,17 @@ BOT_NAME = 'weiboscraper'
 SPIDER_MODULES = ['weiboscraper.spiders']
 NEWSPIDER_MODULE = 'weiboscraper.spiders'
 
+ITEM_PIPELINES = {
+    'weiboscraper.pipelines.UserInfoPipeline': 100,
+}
+
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'weiboscraper (+http://www.yourdomain.com)'
 
 USER_NAME = 'cola_weibo6@163.com'
 USER_PASS = '31415926'
+
+# database ralated
+DB_NAME = 'kweibo'
+
+DOWNLOAD_DELAY = 2
