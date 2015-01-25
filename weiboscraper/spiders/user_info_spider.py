@@ -11,10 +11,11 @@ import pymongo
 from scrapy import Request
 from scrapy import log
 from scrapy.shell import inspect_response
+from pymongo import MongoClient
 
 from utils import beautiful_soup
 from weiboscraper.items import UserInfoItem
-from weiboscraper.settings import USER_NAME, USER_PASS
+from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME
 from weiboscraper.utils.login import WeiboLogin
 
 re_UserInfo = re.compile(r'^http://weibo.com/(\d+)/info')
@@ -34,16 +35,25 @@ class UserInfoSpider(scrapy.Spider):
         super(UserInfoSpider, self).__init__(**kwargs)
         # 设置登录类
         self.login = WeiboLogin(username=USER_NAME, passwd=USER_PASS)
+        # 设置对应该spider的pipeline
+        self.pipelines = ['user-info']
+        
         # 开始抓取的uid列表
-        self.start_uids = ['1663072851']
+        self.start_uids = ['1663072851'] # 中国日报
+        #self.start_uids = ['3952070245'] # 范冰冰
         
-        #scrapy.log.start()
+        # 数据库相关
+        log.msg('Connecting the MongoDB...', log.INFO)
+        self.client = MongoClient()
+        self.db = self.client[DB_NAME]
+        self.collection = self.db['exp_user_info']
         
+        # 开始登录微博
         login_url = self.login.login()
         if login_url:
             self.start_urls.append(login_url)
         else:
-            print 'Logg in error'
+            log.msg('Log in error. ', log.ERROR)
     
     def _check_url(self, dest_url, src_url):
         # 判断参数前的url是否相同
@@ -144,6 +154,7 @@ class UserInfoSpider(scrapy.Spider):
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
+        is_valid = True # 判别是否是合法的item
         log.msg('Parse url: %s' % response.url, level=log.INFO)
         #log.msg('Response body: %s' % response.body)
         
@@ -151,6 +162,7 @@ class UserInfoSpider(scrapy.Spider):
         if response.url.find('pagenotfound') > 0:
             # 匹配源request
             #import ipdb; ipdb.set_trace()
+            is_valid = False
             log.msg('Page not found: %s' % response.url, log.ERROR)
             uid = response.meta['uid']
             new_url = 'http://weibo.com/u/%s' % (uid) # 直接访问组织帐号的首页
@@ -414,10 +426,11 @@ class UserInfoSpider(scrapy.Spider):
                 for a in tags_div.find('span', attrs={'class': 'pt_detail'}).find_all('a'):
                     user_info_item['tags'].append(a.text.strip())
                 
-        
+        # 如果打算将item包含进去，则is_valid则为True
         log.msg('parse %s finish' % response.url, log.INFO)
-        print user_info_item
-        yield user_info_item
+        if is_valid:
+            print user_info_item
+            yield user_info_item
 
 if __name__ == '__main__':
     spider = UserInfoSpider()
