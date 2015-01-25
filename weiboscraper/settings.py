@@ -25,5 +25,6 @@ USER_PASS = '31415926'
 
 # database ralated
 DB_NAME = 'kweibo'
+USER_INFO_COLLECTION_NAME = 'exp_user_info'
 
-DOWNLOAD_DELAY = 2
+DOWNLOAD_DELAY = 10

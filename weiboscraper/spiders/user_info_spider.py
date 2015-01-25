@@ -13,9 +13,9 @@ from scrapy import log
 from scrapy.shell import inspect_response
 from pymongo import MongoClient
 
-from utils import beautiful_soup
+from utils import beautiful_soup, load_uid_list
 from weiboscraper.items import UserInfoItem
-from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME
+from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME, USER_INFO_COLLECTION_NAME
 from weiboscraper.utils.login import WeiboLogin
 
 re_UserInfo = re.compile(r'^http://weibo.com/(\d+)/info')
@@ -25,6 +25,9 @@ re_Site = re.compile(r'^http://weibo.com/(.*)')
 
 re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
 re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
+
+log.msg('Loading uid list...')
+UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/user-list-sample-120.txt')
 
 class UserInfoSpider(scrapy.Spider):
     name = 'userinfo'
@@ -42,11 +45,14 @@ class UserInfoSpider(scrapy.Spider):
         self.start_uids = ['1663072851'] # 中国日报
         #self.start_uids = ['3952070245'] # 范冰冰
         
+        self.current_total_processed = 0 # 当前已经抓取的页面数
+        self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
+        
         # 数据库相关
         log.msg('Connecting the MongoDB...', log.INFO)
         self.client = MongoClient()
         self.db = self.client[DB_NAME]
-        self.collection = self.db['exp_user_info']
+        self.collection = self.db[USER_INFO_COLLECTION_NAME]
         
         # 开始登录微博
         login_url = self.login.login()
@@ -78,6 +84,28 @@ class UserInfoSpider(scrapy.Spider):
         request = response.request.replace(url=url, method='get', callback=self.parse_item)
         return request
         
+    def make_request_list(self, num_request = 100):
+        """ 根据当前的情况生成request的list
+        """
+        request_list = []
+        # 每处理100个页面，就增加request
+        if self.current_total_processed % 100 == 0 and self.current_uidlist_count < len(UID_LIST):
+            end_index = self.current_uidlist_count + num_request
+            if end_index > len(UID_LIST):
+                end_index = len(UID_LIST)
+                
+            for i in range(self.current_uidlist_count, end_index):
+                uid = UID_LIST[i]
+                url = 'http://weibo.com/%s/info' % (uid)
+                meta = {'uid': uid, 'index': i}
+                request = Request(url=url, callback=self.parse_user_info, meta = meta)
+                
+                request_list.append(request)
+                
+            self.current_uidlist_count = end_index
+        
+        return request_list
+        
     def parse(self, response):
         """ 处理登录url，保存cookie信息，默认的回调处理函数
         """
@@ -89,11 +117,13 @@ class UserInfoSpider(scrapy.Spider):
         log.msg('json data: %s' % data, level=log.INFO)
         if data['result'] == True:
             self.logined = True
-                        
-            url = 'http://weibo.com/%s/info/' % (self.start_uids[0])
-            meta = {'uid': self.start_uids[0]}
-            request = Request(url=url, callback=self.parse_user_info, meta = meta)
-            yield request
+            
+            self.current_total_processed = 0 # 当前已经抓取的页面数
+            self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
+            request_list = self.make_request_list()
+            # 将一些uid加入初始抓取的列表
+            for request in request_list:
+                yield request
             
         else:
             self.log('login failed: errno=%s, reason=%s' % (data.get('errno', ''), data.get('reason', '')))
@@ -101,6 +131,10 @@ class UserInfoSpider(scrapy.Spider):
     def parse_org_info(self, response):
         """ 抽取组织主页的信息
         """
+        request_list = self.make_request_list()
+        for request in request_list:
+            yield request
+            
         user_info_item = UserInfoItem()
         user_info_item['is_org'] = True
         user_info_item['uid'] = response.meta['uid']
@@ -148,12 +182,18 @@ class UserInfoSpider(scrapy.Spider):
         
         #print user_info_item
         #import ipdb; ipdb.set_trace()
+        self.current_total_processed += 1
         
         yield user_info_item
         
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
+        # 添加接下来要处理的request
+        request_list = self.make_request_list()
+        for request in request_list:
+            yield request
+        
         is_valid = True # 判别是否是合法的item
         log.msg('Parse url: %s' % response.url, level=log.INFO)
         #log.msg('Response body: %s' % response.body)
@@ -320,35 +360,35 @@ class UserInfoSpider(scrapy.Spider):
         if career_div is not None:
             if not new_style:
                 for div in career_div.find_all(attrs={'class': 'con'}):
-                    work_info = WorkInfo()
+                    work_info = dict()
                     ps = div.find_all('p')
                     for p in ps:
                         a = p.find('a')
                         if a is not None:
-                            work_info.name = a.text
+                            work_info['name'] = a.text
                             text = p.text
                             if '(' in text:
-                                work_info.date = text.strip().split('(')[1].strip(')')
+                                work_info['date'] = text.strip().split('(')[1].strip(')')
                         else:
                             text = p.text
                             if text.startswith(u'地区：'):
-                                work_info.location = text.split(u'：', 1)[1]
+                                work_info['location'] = text.split(u'：', 1)[1]
                             elif text.startswith(u'职位：'):
-                                work_info.position = text.split(u'：', 1)[1]
+                                work_info['position'] = text.split(u'：', 1)[1]
                             else:
-                                work_info.detail = text
+                                work_info['detail'] = text
                     user_info_item['work'].append(work_info)
             else:
                 li = career_div.find('li', attrs={'class': 'li_1'})
                 for span in li.find_all('span', attrs={'class': 'pt_detail'}):
-                    work_info = WorkInfo()
+                    work_info = dict()
                     
                     text = span.text
                     a = span.find('a')
                     if a is not None:
-                        work_info.name = a.text
+                        work_info['name'] = a.text
                     if '(' in text:
-                        work_info.date = text.strip().split('(')[1]\
+                        work_info['date'] = text.strip().split('(')[1]\
                                             .replace('\r', '')\
                                             .replace('\n', '')\
                                             .replace('\t', '')\
@@ -359,11 +399,11 @@ class UserInfoSpider(scrapy.Spider):
                         if len(l) == 0:
                             continue
                         if l.startswith(u'地区：'):
-                            work_info.location = l.split(u'：', 1)[1]
+                            work_info['location'] = l.split(u'：', 1)[1]
                         elif l.startswith(u'职位：'):
-                            work_info.position = l.split(u'：', 1)[1]
+                            work_info['position'] = l.split(u'：', 1)[1]
                         else:
-                            work_info.detail = text.replace('\r', '')\
+                            work_info['detail'] = text.replace('\r', '')\
                                                     .replace('\n', '')\
                                                     .replace('\t', '')\
                                                     .strip()
@@ -374,17 +414,18 @@ class UserInfoSpider(scrapy.Spider):
         if edu_div is not None:
             if not new_style:
                 for div in edu_div.find_all(attrs={'class': 'con'}):
-                    edu_info = EduInfo()
+                    edu_info = dict()
                     ps = div.find_all('p')
                     for p in ps:
                         a = p.find('a')
                         text = p.text
                         if a is not None:
-                            edu_info.name = a.text
+                            edu_info['name'] = a.text
                             if '(' in text:
-                                edu_info.date = text.strip().split('(')[1].strip().strip(')')
+                                edu_info['date'] = text.strip().split('(')[1].strip().strip(')')
                         else:
-                            edu_info.detail = text
+                            edu_info['detail'] = text
+                            
                     user_info_item['edu'].append(edu_info)
             else:
                 span = edu_div.find('li', attrs={'class': 'li_1'})\
@@ -402,17 +443,17 @@ class UserInfoSpider(scrapy.Spider):
                         end_pos = len(text)
                     t = text[start_pos: end_pos]
                     
-                    edu_info = EduInfo()
-                    edu_info.name = name
+                    edu_info = dict()
+                    edu_info['name'] = name
                     if '(' in text:
-                        edu_info.date = t.strip().split('(')[1]\
+                        edu_info['date'] = t.strip().split('(')[1]\
                                             .replace('\r', '')\
                                             .replace('\n', '')\
                                             .replace('\t', '')\
                                             .split(')', 1)[0]
                         t = t[t.find(')')+1:]
                     text = text[end_pos:]
-                    edu_info.detail = t.replace('\r', '').replace('\n', '')\
+                    edu_info['detail'] = t.replace('\r', '').replace('\n', '')\
                                         .replace('\t', '').strip()
                     user_info_item['edu'].append(edu_info)
                     
@@ -429,8 +470,10 @@ class UserInfoSpider(scrapy.Spider):
         # 如果打算将item包含进去，则is_valid则为True
         log.msg('parse %s finish' % response.url, log.INFO)
         if is_valid:
-            print user_info_item
+            #print user_info_item
+            self.current_total_processed += 1
             yield user_info_item
+            
 
 if __name__ == '__main__':
     spider = UserInfoSpider()

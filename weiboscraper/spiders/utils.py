@@ -14,3 +14,14 @@ def beautiful_soup(html, logger=None):
             logger.info('lxml not installed')
         return BeautifulSoup(html)
 
+
+def load_uid_list(path):
+    """ 从文件中导入uid列表
+    """
+    f = open(path)
+    uid_list = []
+    for line in f:
+        uid = line.strip()
+        uid_list.append(uid)
+        
+    return uid_list
