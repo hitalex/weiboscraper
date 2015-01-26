@@ -23,6 +23,10 @@ SPIDER_MIDDLEWARES = {
     'scrapy.contrib.spidermiddleware.referer.RefererMiddleware': True,
 }
 
+EXTENSIONS = {
+    'weiboscraper.extensions.SpiderRequestLogging': 0,
+}
+
 # 使用自己设定的user-agent
 DOWNLOADER_MIDDLEWARES = {
     'scrapy.contrib.downloadermiddleware.useragent.UserAgentMiddleware' : None,
@@ -32,7 +36,7 @@ DOWNLOADER_MIDDLEWARES = {
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'weiboscraper (+http://www.yourdomain.com)'
 
-USER_NAME = 'cola_weibo8@163.com'
+USER_NAME = 'cola_weibo6@163.com'
 USER_PASS = '31415926'
 
 # database ralated
