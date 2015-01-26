@@ -45,8 +45,6 @@ class UserInfoSpider(scrapy.Spider):
         self.start_uids = ['1663072851'] # 中国日报
         #self.start_uids = ['3952070245'] # 范冰冰
         
-        self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
-        
         # 数据库相关
         log.msg('Connecting the MongoDB...', log.INFO)
         self.client = MongoClient()
@@ -90,11 +88,15 @@ class UserInfoSpider(scrapy.Spider):
         num_request_scheduled = self.crawler.stats.get_value('request_scheduled')
         num_request_issued = self.crawler.stats.get_value('request_issued')
         num_request_left = num_request_issued - num_request_scheduled # 该值可能为负值
+        log.msg('Request issued: %d, scheduled: %d, left: %d' % (num_request_issued, num_request_issued, num_request_left), log.DEBUG)
+        
+        current_uidlist_count = self.crawler.stats.get_value('current_uidlist_count')
+        log.msg('Current uidlist count: %d' % (current_uidlist_count), log.DEBUG)
         
         request_list = []
         last_uid = ''
-        if num_request_left < 5 and self.current_uidlist_count < len(UID_LIST):         
-            current_index = self.current_uidlist_count
+        if num_request_left < 5 and current_uidlist_count < len(UID_LIST):
+            current_index = current_uidlist_count
             while current_index < len(UID_LIST) and len(request_list) < num_request:
                 uid = UID_LIST[current_index]
                 # 检查数据库中是否已经存在该uid
@@ -105,7 +107,6 @@ class UserInfoSpider(scrapy.Spider):
                 
                 url = 'http://weibo.com/%s/info' % (uid)
                 meta = {'uid': uid, 'index': current_index}
-                
                 if last_uid == '':
                     request = Request(url=url, callback=self.parse_user_info, meta = meta)
                 else:
@@ -116,9 +117,9 @@ class UserInfoSpider(scrapy.Spider):
                 current_index += 1
                 last_uid = uid
             
-            self.current_uidlist_count += len(request_list)
-            log.msg('Adding %d more requests.' % len(request_list), log.INFO)
+            self.crawler.stats.set_value('current_uidlist_count', current_index)
         
+        log.msg('Adding %d more requests.' % len(request_list), log.INFO)
         return request_list
         
     def parse(self, response):
@@ -138,8 +139,8 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('request_issued', 0)
             self.crawler.stats.set_value('items_scraped', 0)
             self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
+            self.crawler.stats.set_value('current_uidlist_count', 0)
         
-            self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
             request_list = self.make_request_list()
             # 将一些uid加入初始抓取的列表
             for request in request_list:
@@ -211,6 +212,9 @@ class UserInfoSpider(scrapy.Spider):
         """ 普通用户信息抓取，例如：
         """
         #import ipdb; ipdb.set_trace()
+        # TODO：判断是否已经被ban
+        
+        
         # 添加接下来要处理的request
         request_list = self.make_request_list()
         for request in request_list:

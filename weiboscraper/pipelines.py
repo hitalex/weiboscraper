@@ -26,6 +26,9 @@ class UserInfoPipeline(object):
         # 如果该pipelien不在spider的指定的pipeline中，则直接忽略
         if self.name not in getattr(spider, 'pipelines', []):
             return item
+            
+        if not item['n_follows']:
+            raise DropItem('Incomplete item: %s' % item)
         
         #import ipdb; ipdb.set_trace()
         # 检查数据库中是否有重复
