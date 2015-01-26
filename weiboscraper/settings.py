@@ -23,6 +23,7 @@ SPIDER_MIDDLEWARES = {
     'scrapy.contrib.spidermiddleware.referer.RefererMiddleware': True,
 }
 
+MYEXT_ENABLED = False
 EXTENSIONS = {
     'weiboscraper.extensions.SpiderRequestLogging': 0,
 }
