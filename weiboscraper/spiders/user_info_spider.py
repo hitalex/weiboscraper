@@ -27,7 +27,7 @@ re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
 re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
 
 log.msg('Loading uid list...')
-UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/user-list-sample-120.txt')
+UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-20.txt')
 
 class UserInfoSpider(scrapy.Spider):
     name = 'userinfo'
@@ -45,7 +45,6 @@ class UserInfoSpider(scrapy.Spider):
         self.start_uids = ['1663072851'] # 中国日报
         #self.start_uids = ['3952070245'] # 范冰冰
         
-        self.current_total_processed = 0 # 当前已经抓取的页面数
         self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
         
         # 数据库相关
@@ -89,7 +88,11 @@ class UserInfoSpider(scrapy.Spider):
         """
         request_list = []
         # 每处理100个页面，就增加request
-        if self.current_total_processed % 100 == 0 and self.current_uidlist_count < len(UID_LIST):
+        num_request_scheduled = self.crawler.stats.get_value('request_scheduled')
+        num_request_issued = self.crawler.stats.get_value('request_issued')
+        num_request_left = num_request_issued - num_request_scheduled # 该值可能为负值
+        
+        if num_request_left < 5 and self.current_uidlist_count < len(UID_LIST):
             end_index = self.current_uidlist_count + num_request
             if end_index > len(UID_LIST):
                 end_index = len(UID_LIST)
@@ -118,11 +121,17 @@ class UserInfoSpider(scrapy.Spider):
         if data['result'] == True:
             self.logined = True
             
-            self.current_total_processed = 0 # 当前已经抓取的页面数
+            # 记录已经发出的request数量，每当还剩余的request数少于特定值时，则增加request
+            # NOTE: request_issued不包括第一次登录时的login_url的request
+            self.crawler.stats.set_value('request_issued', 0)
+            self.crawler.stats.set_value('items_scraped', 0)
+            self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
+        
             self.current_uidlist_count = 0  # UID_LIST当前已经加入的个数的index
             request_list = self.make_request_list()
             # 将一些uid加入初始抓取的列表
             for request in request_list:
+                self.crawler.stats.inc_value('request_issued')
                 yield request
             
         else:
@@ -133,6 +142,7 @@ class UserInfoSpider(scrapy.Spider):
         """
         request_list = self.make_request_list()
         for request in request_list:
+            self.crawler.stats.inc_value('request_issued')
             yield request
             
         user_info_item = UserInfoItem()
@@ -182,16 +192,17 @@ class UserInfoSpider(scrapy.Spider):
         
         #print user_info_item
         #import ipdb; ipdb.set_trace()
-        self.current_total_processed += 1
         
         yield user_info_item
         
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
+        import ipdb; ipdb.set_trace()
         # 添加接下来要处理的request
         request_list = self.make_request_list()
         for request in request_list:
+            self.crawler.stats.inc_value('request_issued')
             yield request
         
         is_valid = True # 判别是否是合法的item
@@ -207,6 +218,7 @@ class UserInfoSpider(scrapy.Spider):
             uid = response.meta['uid']
             new_url = 'http://weibo.com/u/%s' % (uid) # 直接访问组织帐号的首页
             request = Request(url=new_url, callback=self.parse_org_info, meta={'uid':uid})
+            self.crawler.stats.inc_value('request_issued')
             yield request
         
         # 从用户的信息页面抽取user info
@@ -470,8 +482,7 @@ class UserInfoSpider(scrapy.Spider):
         # 如果打算将item包含进去，则is_valid则为True
         log.msg('parse %s finish' % response.url, log.INFO)
         if is_valid:
-            #print user_info_item
-            self.current_total_processed += 1
+            print user_info_item
             yield user_info_item
             
 

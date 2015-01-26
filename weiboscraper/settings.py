@@ -13,6 +13,8 @@ BOT_NAME = 'weiboscraper'
 SPIDER_MODULES = ['weiboscraper.spiders']
 NEWSPIDER_MODULE = 'weiboscraper.spiders'
 
+STATS_CLASS = 'weiboscraper.stats.ItemStatsCollector' # 自定义数据收集器
+
 ITEM_PIPELINES = {
     'weiboscraper.pipelines.UserInfoPipeline': 100,
 }
