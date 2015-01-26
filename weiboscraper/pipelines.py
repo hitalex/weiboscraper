@@ -29,9 +29,10 @@ class UserInfoPipeline(object):
         
         #import ipdb; ipdb.set_trace()
         # 检查数据库中是否有重复
-        cur = spider.collection.find({'uid':item['uid']})
-        if cur.count() > 0:
-            raise DropItem('User already in collection.')
+        # NOTE: 该检查已经放入spider中添加request时进行检测
+        #cur = spider.collection.find({'uid':item['uid']})
+        #if cur.count() > 0:
+        #    raise DropItem('User already in collection.')
             
         # 保存到数据库中
         # TODO: item_id = spider.collection.insert(item) # 执行该句出现错误

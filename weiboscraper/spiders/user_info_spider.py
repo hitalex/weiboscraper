@@ -27,7 +27,7 @@ re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
 re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
 
 log.msg('Loading uid list...')
-UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-20.txt')
+UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
 
 class UserInfoSpider(scrapy.Spider):
     name = 'userinfo'
@@ -86,26 +86,38 @@ class UserInfoSpider(scrapy.Spider):
     def make_request_list(self, num_request = 100):
         """ 根据当前的情况生成request的list
         """
-        request_list = []
-        # 每处理100个页面，就增加request
+        # 得到关于request处理的统计数据
         num_request_scheduled = self.crawler.stats.get_value('request_scheduled')
         num_request_issued = self.crawler.stats.get_value('request_issued')
         num_request_left = num_request_issued - num_request_scheduled # 该值可能为负值
         
-        if num_request_left < 5 and self.current_uidlist_count < len(UID_LIST):
-            end_index = self.current_uidlist_count + num_request
-            if end_index > len(UID_LIST):
-                end_index = len(UID_LIST)
+        request_list = []
+        last_uid = ''
+        if num_request_left < 5 and self.current_uidlist_count < len(UID_LIST):         
+            current_index = self.current_uidlist_count
+            while current_index < len(UID_LIST) and len(request_list) < num_request:
+                uid = UID_LIST[current_index]
+                # 检查数据库中是否已经存在该uid
+                cur = self.collection.find({'uid':uid})
+                if cur.count() > 0:
+                    current_index += 1
+                    continue
                 
-            for i in range(self.current_uidlist_count, end_index):
-                uid = UID_LIST[i]
                 url = 'http://weibo.com/%s/info' % (uid)
-                meta = {'uid': uid, 'index': i}
-                request = Request(url=url, callback=self.parse_user_info, meta = meta)
+                meta = {'uid': uid, 'index': current_index}
                 
+                if last_uid == '':
+                    request = Request(url=url, callback=self.parse_user_info, meta = meta)
+                else:
+                    referer_url = 'http://weibo.com/%s/info' % (last_uid)
+                    request = Request(url=url, callback=self.parse_user_info, meta = meta, headers={'Referer':referer_url})
+                    
                 request_list.append(request)
-                
-            self.current_uidlist_count = end_index
+                current_index += 1
+                last_uid = uid
+            
+            self.current_uidlist_count += len(request_list)
+            log.msg('Adding %d more requests.' % len(request_list), log.INFO)
         
         return request_list
         
@@ -198,7 +210,7 @@ class UserInfoSpider(scrapy.Spider):
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         # 添加接下来要处理的request
         request_list = self.make_request_list()
         for request in request_list:
@@ -482,7 +494,7 @@ class UserInfoSpider(scrapy.Spider):
         # 如果打算将item包含进去，则is_valid则为True
         log.msg('parse %s finish' % response.url, log.INFO)
         if is_valid:
-            print user_info_item
+            #print user_info_item
             yield user_info_item
             
 
