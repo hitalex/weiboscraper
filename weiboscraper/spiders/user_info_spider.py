@@ -11,6 +11,9 @@ import pymongo
 from scrapy import Request
 from scrapy import log
 from scrapy.shell import inspect_response
+from scrapy import signals
+from scrapy.xlib.pydispatch import dispatcher
+
 from pymongo import MongoClient
 
 from utils import beautiful_soup, load_uid_list
@@ -81,6 +84,12 @@ class UserInfoSpider(scrapy.Spider):
         request = response.request.replace(url=url, method='get', callback=self.parse_item)
         return request
         
+    def request_scheduled(self):
+        """ 已绑定到 request_scheduled 消息
+        """
+        # 增加stats数量
+        self.crawler.stats.inc_value('request_scheduled')
+        
     def make_request_list(self, num_request = 100):
         """ 根据当前的情况生成request的list
         """
@@ -88,7 +97,7 @@ class UserInfoSpider(scrapy.Spider):
         num_request_scheduled = self.crawler.stats.get_value('request_scheduled')
         num_request_issued = self.crawler.stats.get_value('request_issued')
         num_request_left = num_request_issued - num_request_scheduled # 该值可能为负值
-        log.msg('Request issued: %d, scheduled: %d, left: %d' % (num_request_issued, num_request_issued, num_request_left), log.DEBUG)
+        log.msg('Request issued: %d, scheduled: %d, left: %d' % (num_request_issued, num_request_scheduled, num_request_left), log.DEBUG)
         
         current_uidlist_count = self.crawler.stats.get_value('current_uidlist_count')
         log.msg('Current uidlist count: %d' % (current_uidlist_count), log.DEBUG)
@@ -138,8 +147,11 @@ class UserInfoSpider(scrapy.Spider):
             # NOTE: request_issued不包括第一次登录时的login_url的request
             self.crawler.stats.set_value('request_issued', 0)
             self.crawler.stats.set_value('items_scraped', 0)
-            self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
             self.crawler.stats.set_value('current_uidlist_count', 0)
+            
+            # register some signals
+            self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
+            dispatcher.connect(self.request_scheduled, signals.request_scheduled)
         
             request_list = self.make_request_list()
             # 将一些uid加入初始抓取的列表
@@ -211,7 +223,7 @@ class UserInfoSpider(scrapy.Spider):
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
-        #import ipdb; ipdb.set_trace()
+        import ipdb; ipdb.set_trace()
         # TODO：判断是否已经被ban
         
         
