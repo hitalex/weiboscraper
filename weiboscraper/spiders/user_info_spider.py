@@ -90,7 +90,7 @@ class UserInfoSpider(scrapy.Spider):
         # 增加stats数量
         self.crawler.stats.inc_value('request_scheduled')
         
-    def make_request_list(self, num_request = 100):
+    def make_request_list(self, num_request = 50):
         """ 根据当前的情况生成request的list
         """
         # 得到关于request处理的统计数据
@@ -153,7 +153,7 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
             dispatcher.connect(self.request_scheduled, signals.request_scheduled)
         
-            request_list = self.make_request_list(num_request = 2)
+            request_list = self.make_request_list(num_request = 10)
             # 将一些uid加入初始抓取的列表
             for request in request_list:
                 self.crawler.stats.inc_value('request_issued')
@@ -223,10 +223,8 @@ class UserInfoSpider(scrapy.Spider):
     def parse_user_info(self, response): # 默认的回调函数
         """ 普通用户信息抓取，例如：
         """
-        import ipdb; ipdb.set_trace()
-        # TODO：判断是否已经被ban
-        
-        
+        #import ipdb; ipdb.set_trace()
+
         # 添加接下来要处理的request
         request_list = self.make_request_list()
         for request in request_list:
@@ -511,7 +509,7 @@ class UserInfoSpider(scrapy.Spider):
         log.msg('parse %s finish' % response.url, log.INFO)
         
         # 检查spider是否已经被封
-        if not item['n_follows']:
+        if not user_info_item['n_follows']:
             log.msg('The spider may have been banned.', log.ERROR)
         else:
             if is_valid:
