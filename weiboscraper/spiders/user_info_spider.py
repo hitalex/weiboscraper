@@ -30,7 +30,8 @@ re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
 re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
 
 log.msg('Loading uid list...')
-UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
+#UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
+UID_LIST = load_uid_list('/home/kqc/github/event-trend-prediction/data/mblog-user-set-random-100.txt')
 
 class UserInfoSpider(scrapy.Spider):
     name = 'userinfo'
@@ -84,20 +85,17 @@ class UserInfoSpider(scrapy.Spider):
         request = response.request.replace(url=url, method='get', callback=self.parse_item)
         return request
         
-    def request_scheduled(self):
-        """ 已绑定到 request_scheduled 消息
-        """
-        # 增加stats数量
-        self.crawler.stats.inc_value('request_scheduled')
+    def response_received(self):
+        self.crawler.stats.inc_value('response_received')
         
     def make_request_list(self, num_request = 50):
         """ 根据当前的情况生成request的list
         """
         # 得到关于request处理的统计数据
-        num_request_scheduled = self.crawler.stats.get_value('request_scheduled')
+        num_response_received= self.crawler.stats.get_value('response_received')
         num_request_issued = self.crawler.stats.get_value('request_issued')
-        num_request_left = num_request_issued - num_request_scheduled # 该值可能为负值
-        log.msg('Request issued: %d, scheduled: %d, left: %d' % (num_request_issued, num_request_scheduled, num_request_left), log.DEBUG)
+        num_request_left = num_request_issued - num_response_received # 该值可能为负值
+        log.msg('Request issued: %d, response received: %d, left: %d' % (num_request_issued, num_response_received, num_request_left), log.DEBUG)
         
         current_uidlist_count = self.crawler.stats.get_value('current_uidlist_count')
         log.msg('Current uidlist count: %d' % (current_uidlist_count), log.DEBUG)
@@ -150,8 +148,9 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('current_uidlist_count', 0)
             
             # register some signals
-            self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
-            dispatcher.connect(self.request_scheduled, signals.request_scheduled)
+            self.crawler.stats.set_value('response_received', 0)
+            # 记录收到的response的数量
+            dispatcher.connect(self.response_received, signals.response_received)
         
             request_list = self.make_request_list(num_request = 10)
             # 将一些uid加入初始抓取的列表
@@ -246,6 +245,9 @@ class UserInfoSpider(scrapy.Spider):
             request = Request(url=new_url, callback=self.parse_org_info, meta={'uid':uid})
             self.crawler.stats.inc_value('request_issued')
             yield request
+        
+        # TODO: 判断用户是否存在， http://weibo.com/sorry?usernotexists&code=100001。
+        # 不过用户确实是存在的
         
         # 从用户的信息页面抽取user info
         user_info_item = UserInfoItem()
