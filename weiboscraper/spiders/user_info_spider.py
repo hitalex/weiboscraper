@@ -153,7 +153,7 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('request_scheduled', 0) # 记录request被发出的次数
             dispatcher.connect(self.request_scheduled, signals.request_scheduled)
         
-            request_list = self.make_request_list()
+            request_list = self.make_request_list(num_request = 2)
             # 将一些uid加入初始抓取的列表
             for request in request_list:
                 self.crawler.stats.inc_value('request_issued')
@@ -509,9 +509,14 @@ class UserInfoSpider(scrapy.Spider):
                 
         # 如果打算将item包含进去，则is_valid则为True
         log.msg('parse %s finish' % response.url, log.INFO)
-        if is_valid:
-            #print user_info_item
-            yield user_info_item
+        
+        # 检查spider是否已经被封
+        if not item['n_follows']:
+            log.msg('The spider may have been banned.', log.ERROR)
+        else:
+            if is_valid:
+                #print user_info_item
+                yield user_info_item
             
 
 if __name__ == '__main__':
