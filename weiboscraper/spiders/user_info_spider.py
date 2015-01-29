@@ -5,6 +5,7 @@ The parser code is borrowed from : https://github.com/chineking/cola/blob/master
 """
 import re
 import json
+import time
 
 import scrapy
 import pymongo
@@ -15,6 +16,8 @@ from scrapy import signals
 from scrapy.xlib.pydispatch import dispatcher
 
 from pymongo import MongoClient
+
+import numpy as np
 
 from utils import beautiful_soup, load_uid_list
 from weiboscraper.items import UserInfoItem
@@ -28,6 +31,9 @@ re_Site = re.compile(r'^http://weibo.com/(.*)')
 
 re_UID = re.compile(r"CONFIG\[\'oid\'\]=\'(\d+)\'")
 re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
+
+re_UserCardAjax = re.compile(r"try\{STK\_\d+\((.*?)\)\}catch\(e\)")
+re_UserCardUrl = re.compile(r"http://weibo.com/(.*?)\?")
 
 log.msg('Loading uid list...')
 #UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
@@ -60,33 +66,15 @@ class UserInfoSpider(scrapy.Spider):
         if login_url:
             self.start_urls.append(login_url)
         else:
+            print 'Log in error.'
             log.msg('Log in error. ', log.ERROR)
-    
-    def _check_url(self, dest_url, src_url):
-        # 判断参数前的url是否相同
-        return dest_url.split('?')[0] == src_url.split('?')[0]
-    
-    def check(self, url, br):
-        # 判断是否是否发生了跳转
-        dest_url = br.geturl()
-        if not self._check_url(dest_url, url):
-            # 如果确实发生跳转，则判断是那种情况：未登录或用户不存在
-            if dest_url.startswith('http://weibo.com/login.php'):
-                raise WeiboLoginFailure('Weibo not login or login expired')
-            if dest_url.startswith('http://weibo.com/sorry?usernotexists'):
-                self.bundle.exists = False
-                return False
-            #return False
-            
-        return True 
-        
-    def check_page(self, response):
-        url = 'http://weibo.com/'
-        request = response.request.replace(url=url, method='get', callback=self.parse_item)
-        return request
         
     def response_received(self):
         self.crawler.stats.inc_value('response_received')
+        # 设置随机等待的时间: 假设等待时间服从Possion分布
+        sec = np.random.poisson(10) # 平均值为10, 再加上scrapy的等待时间5 sec
+        log.msg('Sleep for %s secs.' % sec, log.INFO)
+        time.sleep(sec)
         
     def make_request_list(self, num_request = 50):
         """ 根据当前的情况生成request的list
@@ -112,14 +100,23 @@ class UserInfoSpider(scrapy.Spider):
                     current_index += 1
                     continue
                 
-                url = 'http://weibo.com/%s/info' % (uid)
+                #url = 'http://weibo.com/%s/info' % (uid)
+                # 构造ajax url, 这是主页面的user card info
+                #uid = '1642591402' # 新浪娱乐， 机构
+                #uid = '3910587095' # 美少女大杂烩，未认证用户
+                #uid = '1701401324' # 徐昕，认证用户
+                url = 'http://weibo.com/aj/v6/user/newcard?ajwvr=6&id=%s&type=1&callback=STK_142251747912323' % uid
                 meta = {'uid': uid, 'index': current_index}
+                # 模拟header的各项参数
                 if last_uid == '':
-                    request = Request(url=url, callback=self.parse_user_info, meta = meta)
+                    Referer = ''
                 else:
-                    referer_url = 'http://weibo.com/%s/info' % (last_uid)
-                    request = Request(url=url, callback=self.parse_user_info, meta = meta, headers={'Referer':referer_url})
-                    
+                    Referer = 'http://weibo.com/u/5445629123/home?topnav=1&wvr=6'
+                headers = {
+                    'Referer': Referer,
+                    'Host' : 'weibo.com',
+                }
+                request = Request(url=url, callback=self.parse_user_card_info, meta = meta, headers = headers)
                 request_list.append(request)
                 current_index += 1
                 last_uid = uid
@@ -151,8 +148,8 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('response_received', 0)
             # 记录收到的response的数量
             dispatcher.connect(self.response_received, signals.response_received)
-        
-            request_list = self.make_request_list(num_request = 10)
+            
+            request_list = self.make_request_list(num_request = 100)
             # 将一些uid加入初始抓取的列表
             for request in request_list:
                 self.crawler.stats.inc_value('request_issued')
@@ -161,6 +158,101 @@ class UserInfoSpider(scrapy.Spider):
         else:
             self.log('login failed: errno=%s, reason=%s' % (data.get('errno', ''), data.get('reason', '')))
             
+    def parse_user_card_info(self, response):
+        """ 解析用户和机构的信息
+        用户信息包括：avatar, uid, nickname, desc, location
+        """
+        # 增加request
+        """
+        request_list = self.make_request_list()
+        for request in request_list:
+            self.crawler.stats.inc_value('request_issued')
+            yield request
+        """ 
+        #import ipdb; ipdb.set_trace()
+        user_info_item = UserInfoItem()
+        
+        m = re_UserCardAjax.search(response.body)
+        if m is None:
+            log.msg('Error parsing ajax response: %s' % reponse.url, log.ERROR)
+            yield user_info_item
+        else:
+            json_str = m.group(1)
+            
+        json_data = json.loads(json_str)
+        if json_data['code'] != '100000':
+            log.msg('Error in response, msg: %s' % json_data['msg'], log.ERROR)
+            yield user_info_item
+        
+        user_info_item['uid'] = response.meta['uid']
+        
+        html_data = json_data['data']
+        soup = beautiful_soup(html_data)
+        
+        nc_head = soup.find('div', attrs={'class':'nc_head'})
+        nc_content = soup.find('div', attrs={'class':'nc_content'})
+        
+        pic_box = nc_head.find('div', attrs={'class':'pic_box'})
+        alist = pic_box.find_all('a')
+        
+        url = alist[0]['href']
+        m = re_UserCardUrl.search(url)
+        user_info_item['username'] = m.group(1)
+        if user_info_item['username'][:2] == 'u/':
+            user_info_item['username'] = user_info_item['username'][2:]
+            
+        user_info_item['nickname'] = pic_box.a.img['title']
+        user_info_item['avatar'] = pic_box.a.img['src']
+        
+        user_info_item['is_org'] = False
+        if len(alist) > 1:
+            user_info_item['is_verified'] = True
+            # 判断该帐号是组织帐号还是认证用户
+            if alist[1].i['class'][1] == 'icon_pf_approve_co':
+                user_info_item['is_org'] = True
+        else:
+            user_info_item['is_verified'] = False
+                            
+        mask = nc_head.find('div', attrs={'class':'mask'})
+        name = mask.find('div', attrs={'class':'name'})
+        user_info_item['nickname'] = name.a['title']
+        if name.em['title'] == u'男':
+            user_info_item['sex'] = True
+        else:
+            user_info_item['sex'] = False
+            
+        intro = mask.find('div', attrs={'class':'intro W_autocut'})
+        if intro.text.strip() != '':  # 可能个人简介不存在
+            user_info_item['intro'] = intro.span['title']
+        
+        # 关注数和粉丝数
+        def parse_number(text):
+            # 抽取关注数和粉丝数
+            num = int(re.search(r'\d+', text).group())
+            if text.find(u'万') >= 0:
+                num *= 10000
+            return num
+            
+        follow_text = nc_content.find('span', attrs={'class':'c_follow W_fb'}).text.strip()
+        user_info_item['n_follows'] = parse_number(follow_text)
+        fans_text = nc_content.find('span', attrs={'class':'c_fans W_fb'}).text.strip()
+        user_info_item['n_fans'] = parse_number(fans_text)
+        weibo_text = nc_content.find('span', attrs={'class':'c_weibo W_fb'}).text.strip()
+        user_info_item['n_weibo'] = parse_number(weibo_text)
+        
+        user_info_list = nc_content.find_all('li', attrs={'class':'info_li'})
+        user_info_item['location'] = user_info_list[0].a['title']
+        if len(user_info_list) >= 2:
+            if user_info_list[1].text.find(u'毕业于') >= 0:
+                user_info_item['edu'] = user_info_list[1].a['title']
+                if len(user_info_list) >= 3:
+                    user_info_item['work'] = user_info_list[2].a['title']
+            else:
+                user_info_item['work'] = user_info_list[1].a['title']
+        
+        print user_info_item
+        yield user_info_item
+
     def parse_org_info(self, response):
         """ 抽取组织主页的信息
         """
@@ -223,7 +315,7 @@ class UserInfoSpider(scrapy.Spider):
         """ 普通用户信息抓取，例如：
         """
         #import ipdb; ipdb.set_trace()
-
+        
         # 添加接下来要处理的request
         request_list = self.make_request_list()
         for request in request_list:
@@ -248,6 +340,8 @@ class UserInfoSpider(scrapy.Spider):
         
         # TODO: 判断用户是否存在， http://weibo.com/sorry?usernotexists&code=100001。
         # 不过用户确实是存在的
+        # TODO: 判断被封：http://weibo.com/sorry?userblock&is_viewer&code=20003
+        # http://sass.weibo.com/accessdeny?uid=5445629123&ip=2682434316&location=1&callbackurl=http%3A%2F%2Fweibo.com%2Fu%2F2029154257
         
         # 从用户的信息页面抽取user info
         user_info_item = UserInfoItem()

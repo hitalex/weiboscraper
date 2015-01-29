@@ -40,6 +40,7 @@ class UserInfoItem(scrapy.Item):
     
     n_follows = Field()
     n_fans = Field()
+    n_weibo = Field() #  已经发的微博数
     
     edu = Field()
     work = Field()
