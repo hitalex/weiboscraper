@@ -31,10 +31,7 @@ import re
 import json
 import cookielib
 
-try:
-    import rsa
-except ImportError:
-    raise DependencyNotInstalledError("rsa")
+import rsa
 
 class WeiboLogin(object):
     def __init__(self, username, passwd):
@@ -75,8 +72,9 @@ class WeiboLogin(object):
             raise Exception('Login Error')
         
     def login(self):
-        login_url = 'http://login.sina.com.cn/sso/login.php?client=ssologin.js(v1.4.5)'
+        #import ipdb; ipdb.set_trace()
         
+        login_url = 'http://login.sina.com.cn/sso/login.php?client=ssologin.js(v1.4.5)'
         try:
             servertime, nonce, pubkey, rsakv = self.prelogin()
             postdata = {
@@ -124,11 +122,10 @@ class WeiboLogin(object):
             return result
             """
             
-            ajax_url_regex = re.compile('location\.replace\(\'(.*)\'\)')
-            matches = ajax_url_regex.search(text)
             p = re.compile('location\.replace\([\'|"](.*?)[\'|"]\)')
-            if matches is not None:
-                ajax_url = matches.group(1) # 返回登录url
+            m = p.search(text)
+            if m is not None:
+                ajax_url = m.group(1) # 返回登录url
                 return ajax_url
             else:
                 return None
