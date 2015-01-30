@@ -21,7 +21,7 @@ import numpy as np
 
 from utils import beautiful_soup, load_uid_list
 from weiboscraper.items import UserInfoItem
-from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME, USER_INFO_COLLECTION_NAME
+from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME, USER_INFO_COLLECTION_NAME, WEIBO_USER_ACCOUNTS
 from weiboscraper.utils.login import WeiboLogin
 
 re_UserInfo = re.compile(r'^http://weibo.com/(\d+)/info')
@@ -35,9 +35,6 @@ re_PAGEID = re.compile(r"CONFIG\[\'page_id\'\]=\'(\d+)\'")
 re_UserCardAjax = re.compile(r"try\{STK\_\d+\((.*?)\)\}catch\(e\)")
 re_UserCardUrl = re.compile(r"http://weibo.com/(.*?)\?")
 
-log.msg('Loading uid list...')
-#UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
-UID_LIST = load_uid_list('/home/kqc/github/event-trend-prediction/data/mblog-user-set-random-100.txt')
 
 class UserInfoSpider(scrapy.Spider):
     name = 'userinfo'
@@ -46,14 +43,14 @@ class UserInfoSpider(scrapy.Spider):
     def __init__(self, **kwargs):
         self.logined = False
         super(UserInfoSpider, self).__init__(**kwargs)
-        # 设置登录类
-        self.login = WeiboLogin(username=USER_NAME, passwd=USER_PASS)
+        
+        self.spider_index = kwargs['index'] # the spider index
+        self.username = kwargs['username']
+        self.passwd = kwargs['passwd']
+        # 设置登录类，对应每一个spider有一个帐号
+        self.login = WeiboLogin(username = self.username, passwd = self.passwd)
         # 设置对应该spider的pipeline
         self.pipelines = ['user-info']
-        
-        # 开始抓取的uid列表
-        self.start_uids = ['1663072851'] # 中国日报
-        #self.start_uids = ['3952070245'] # 范冰冰
         
         # 数据库相关
         log.msg('Connecting the MongoDB...', log.INFO)
@@ -61,7 +58,13 @@ class UserInfoSpider(scrapy.Spider):
         self.db = self.client[DB_NAME]
         self.collection = self.db[USER_INFO_COLLECTION_NAME]
         
+        self.uid_list = ['3217179555', '1932108903', '2172488380']
+        log.msg('Loading uid list...')
+        #UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
+        self.UID_LIST = load_uid_list('/home/kqc/github/event-trend-prediction/data/mblog-user-set-random-100-%d.txt' % self.index)
+        
         # 开始登录微博
+        log.msg('Star to login account: %s' % self.username, log.INFO)
         login_url = self.login.login()
         if login_url:
             self.start_urls.append(login_url)
@@ -73,10 +76,10 @@ class UserInfoSpider(scrapy.Spider):
         self.crawler.stats.inc_value('response_received')
         # 设置随机等待的时间: 假设等待时间服从Possion分布
         sec = np.random.poisson(10) # 平均值为10, 再加上scrapy的等待时间5 sec
-        log.msg('Sleep for %s secs.' % sec, log.INFO)
-        time.sleep(sec)
+        #log.msg('Sleep for %s secs.' % sec, log.INFO)
+        #time.sleep(sec)
         
-    def make_request_list(self, num_request = 50):
+    def make_request_list(self, num_request = 1):
         """ 根据当前的情况生成request的list
         """
         # 得到关于request处理的统计数据
@@ -90,10 +93,10 @@ class UserInfoSpider(scrapy.Spider):
         
         request_list = []
         last_uid = ''
-        if num_request_left < 5 and current_uidlist_count < len(UID_LIST):
+        if num_request_left < 5 and current_uidlist_count < len(self.UID_LIST):
             current_index = current_uidlist_count
-            while current_index < len(UID_LIST) and len(request_list) < num_request:
-                uid = UID_LIST[current_index]
+            while current_index < len(self.UID_LIST) and len(request_list) < num_request:
+                uid = self.UID_LIST[current_index]
                 # 检查数据库中是否已经存在该uid
                 cur = self.collection.find({'uid':uid})
                 if cur.count() > 0:
@@ -105,6 +108,7 @@ class UserInfoSpider(scrapy.Spider):
                 #uid = '1642591402' # 新浪娱乐， 机构
                 #uid = '3910587095' # 美少女大杂烩，未认证用户
                 #uid = '1701401324' # 徐昕，认证用户
+                uid = self.uid_list[self.spider_index]
                 url = 'http://weibo.com/aj/v6/user/newcard?ajwvr=6&id=%s&type=1&callback=STK_142251747912323' % uid
                 meta = {'uid': uid, 'index': current_index}
                 # 模拟header的各项参数
@@ -149,7 +153,7 @@ class UserInfoSpider(scrapy.Spider):
             # 记录收到的response的数量
             dispatcher.connect(self.response_received, signals.response_received)
             
-            request_list = self.make_request_list(num_request = 100)
+            request_list = self.make_request_list(num_request = 1)
             # 将一些uid加入初始抓取的列表
             for request in request_list:
                 self.crawler.stats.inc_value('request_issued')
@@ -160,7 +164,6 @@ class UserInfoSpider(scrapy.Spider):
             
     def parse_user_card_info(self, response):
         """ 解析用户和机构的信息
-        用户信息包括：avatar, uid, nickname, desc, location
         """
         # 增加request
         """
@@ -169,24 +172,32 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.inc_value('request_issued')
             yield request
         """ 
-        #import ipdb; ipdb.set_trace()
-        user_info_item = UserInfoItem()
-        
+        if self.spider_index == 3:
+            import ipdb; ipdb.set_trace()
+            
         m = re_UserCardAjax.search(response.body)
         if m is None:
             log.msg('Error parsing ajax response: %s' % reponse.url, log.ERROR)
-            yield user_info_item
         else:
-            json_str = m.group(1)
-            
-        json_data = json.loads(json_str)
-        if json_data['code'] != '100000':
-            log.msg('Error in response, msg: %s' % json_data['msg'], log.ERROR)
-            yield user_info_item
+            json_str = m.group(1)            
+            json_data = json.loads(json_str)
+            uid = response.meta['uid']
+            if json_data['code'] != '100000':
+                log.msg('Error in response, uid: %s, msg: %s' % (uid, json_data['msg']), log.ERROR)
+            else:
+                html_data = json_data['data']
+                user_info_item = self.parse_user_card_info_text(uid, html_data)
+                
+                print user_info_item
+                #yield user_info_item
         
-        user_info_item['uid'] = response.meta['uid']
+    def parse_user_card_info_text(self, uid, html_data):
+        """ 给定html body解析 user info, 用户信息包括：avatar, uid, nickname, desc, location
+        NOTE: 将该解析单独作为一个函数有两个作用：1）便于单独测试；2）使得parse_user_card_info函数结构清晰
+        """
+        user_info_item = UserInfoItem()
+        user_info_item['uid'] = uid
         
-        html_data = json_data['data']
         soup = beautiful_soup(html_data)
         
         nc_head = soup.find('div', attrs={'class':'nc_head'})
@@ -250,8 +261,7 @@ class UserInfoSpider(scrapy.Spider):
             else:
                 user_info_item['work'] = user_info_list[1].a['title']
         
-        print user_info_item
-        yield user_info_item
+        return user_info_item
 
     def parse_org_info(self, response):
         """ 抽取组织主页的信息
