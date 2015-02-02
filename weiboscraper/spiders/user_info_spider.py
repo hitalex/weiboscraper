@@ -171,9 +171,8 @@ class UserInfoSpider(scrapy.Spider):
         for request in request_list:
             self.crawler.stats.inc_value('request_issued')
             yield request
-        """ 
-        if self.spider_index == 3:
-            import ipdb; ipdb.set_trace()
+        """
+        log.msg('In spider %d - Parsing response url: %s' % (self.spider_index, response.url), log.DEBUG)
             
         m = re_UserCardAjax.search(response.body)
         if m is None:
@@ -187,9 +186,9 @@ class UserInfoSpider(scrapy.Spider):
             else:
                 html_data = json_data['data']
                 user_info_item = self.parse_user_card_info_text(uid, html_data)
-                
-                print user_info_item
-                #yield user_info_item
+                log.msg('Sucess in crawling user: %s' % user_info_item['uid'])
+                #print user_info_item
+                yield user_info_item
         
     def parse_user_card_info_text(self, uid, html_data):
         """ 给定html body解析 user info, 用户信息包括：avatar, uid, nickname, desc, location
@@ -296,7 +295,7 @@ class UserInfoSpider(scrapy.Spider):
                     info_soup = beautiful_soup(data['html'])
                     td_list = info_soup.find_all('td', attrs = {'class':'S_line1'})
                     if len(td_list) != 3:
-                        log.msg('Error parsing: %s' % response.url)
+                        log.msg('Error parsing: %s' % response.url, log.INFO)
                     else:
                         user_info_item['n_follows'] = int(td_list[0].find('strong').text.strip())
                         user_info_item['n_fans'] = int(td_list[1].find('strong').text.strip())
@@ -307,7 +306,7 @@ class UserInfoSpider(scrapy.Spider):
                     ul_list = info_soup.find('ul', attrs={'class':'ul_detail'})
                     li_list = ul_list.find_all('li', attrs={'class':'item S_line2 clearfix'})
                     if len(li_list) == 0:
-                        log.msg('Error parsing: %s' % response.url)
+                        log.msg('Error parsing: %s' % response.url, log.INFO)
                     else:
                         user_info_item['category'] = li_list[0].find('span', attrs={'class':'item_text W_fl'}).text.strip()
                         if len(li_list) > 1:

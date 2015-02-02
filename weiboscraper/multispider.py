@@ -21,9 +21,11 @@ class ReactorControl:
     def add_crawler(self):
         self.crawlers_running += 1
 
-    def remove_crawler(self):
+    def remove_crawler(self, spider, reason):
+        log.msg('Spider %d closed with reason: %s.' % (spider.spider_index, reason), log.INFO)
         self.crawlers_running -= 1
         if self.crawlers_running == 0 :
+            log.msg('Reactor stopped and will exit.', log.INFO)
             reactor.stop()
 
 def setup_crawler(spider_name, index, username, passwd):
@@ -41,7 +43,7 @@ if __name__ == '__main__':
     spider_name = 'userinfo'
     
     reactor_control = ReactorControl()
-    log.start()
+    log.start(loglevel = log.DEBUG, logstdout = False)
     settings = get_project_settings()
     #crawler = Crawler(settings)
     # 从配置文件中获取微博账户信息
