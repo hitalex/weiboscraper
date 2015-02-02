@@ -19,10 +19,12 @@ from pymongo import MongoClient
 
 import numpy as np
 
-from utils import beautiful_soup, load_uid_list
+from utils import beautiful_soup
 from weiboscraper.items import UserInfoItem
 from weiboscraper.settings import USER_NAME, USER_PASS, DB_NAME, USER_INFO_COLLECTION_NAME, WEIBO_USER_ACCOUNTS
 from weiboscraper.utils.login import WeiboLogin
+
+import global_vars # 导入全局变量
 
 re_UserInfo = re.compile(r'^http://weibo.com/(\d+)/info')
 re_UserPIDPage = re.compile(r'^http://weibo.com/p/(\d+)/')
@@ -58,10 +60,7 @@ class UserInfoSpider(scrapy.Spider):
         self.db = self.client[DB_NAME]
         self.collection = self.db[USER_INFO_COLLECTION_NAME]
         
-        self.uid_list = ['3217179555', '1932108903', '2172488380']
         log.msg('Loading uid list...')
-        #UID_LIST = load_uid_list('/home/kqc/github/weiboscraper/weiboscraper/data/user-list-sample-1000.txt')
-        self.UID_LIST = load_uid_list('/home/kqc/github/event-trend-prediction/data/mblog-user-set-random-100-%d.txt' % self.index)
         
         # 开始登录微博
         log.msg('Star to login account: %s' % self.username, log.INFO)
@@ -88,15 +87,14 @@ class UserInfoSpider(scrapy.Spider):
         num_request_left = num_request_issued - num_response_received # 该值可能为负值
         log.msg('Request issued: %d, response received: %d, left: %d' % (num_request_issued, num_response_received, num_request_left), log.DEBUG)
         
-        current_uidlist_count = self.crawler.stats.get_value('current_uidlist_count')
-        log.msg('Current uidlist count: %d' % (current_uidlist_count), log.DEBUG)
+        log.msg('Current uidlist count: %d' % (global_vars.current_uidlist_count), log.DEBUG)
         
         request_list = []
         last_uid = ''
-        if num_request_left < 5 and current_uidlist_count < len(self.UID_LIST):
-            current_index = current_uidlist_count
-            while current_index < len(self.UID_LIST) and len(request_list) < num_request:
-                uid = self.UID_LIST[current_index]
+        if num_request_left < 5 and global_vars.current_uidlist_count < len(global_vars.UID_LIST):
+            current_index = global_vars.current_uidlist_count
+            while current_index < len(global_vars.UID_LIST) and len(request_list) < num_request:
+                uid = global_vars.UID_LIST[current_index]
                 # 检查数据库中是否已经存在该uid
                 cur = self.collection.find({'uid':uid})
                 if cur.count() > 0:
@@ -108,7 +106,7 @@ class UserInfoSpider(scrapy.Spider):
                 #uid = '1642591402' # 新浪娱乐， 机构
                 #uid = '3910587095' # 美少女大杂烩，未认证用户
                 #uid = '1701401324' # 徐昕，认证用户
-                uid = self.uid_list[self.spider_index]
+                #uid = uid_list[self.spider_index]
                 url = 'http://weibo.com/aj/v6/user/newcard?ajwvr=6&id=%s&type=1&callback=STK_142251747912323' % uid
                 meta = {'uid': uid, 'index': current_index}
                 # 模拟header的各项参数
@@ -125,7 +123,7 @@ class UserInfoSpider(scrapy.Spider):
                 current_index += 1
                 last_uid = uid
             
-            self.crawler.stats.set_value('current_uidlist_count', current_index)
+            global_vars.current_uidlist_count = current_index
         
         log.msg('Adding %d more requests.' % len(request_list), log.INFO)
         return request_list
@@ -145,9 +143,6 @@ class UserInfoSpider(scrapy.Spider):
             # 记录已经发出的request数量，每当还剩余的request数少于特定值时，则增加request
             # NOTE: request_issued不包括第一次登录时的login_url的request
             self.crawler.stats.set_value('request_issued', 0)
-            self.crawler.stats.set_value('items_scraped', 0)
-            self.crawler.stats.set_value('current_uidlist_count', 0)
-            
             # register some signals
             self.crawler.stats.set_value('response_received', 0)
             # 记录收到的response的数量

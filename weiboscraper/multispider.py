@@ -13,6 +13,8 @@ from scrapy.crawler import Crawler
 from scrapy import log, signals
 from scrapy.utils.project import get_project_settings
 
+import global_vars
+
 class ReactorControl:
 
     def __init__(self):
@@ -40,6 +42,9 @@ def setup_crawler(spider_name, index, username, passwd):
     log.msg('Crawler %d started...' % index, log.INFO)
     
 if __name__ == '__main__':
+    # 初始化全局变量
+    global_vars.init()
+    
     spider_name = 'userinfo'
     
     reactor_control = ReactorControl()
