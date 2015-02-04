@@ -16,6 +16,8 @@ class WeiboscraperItem(scrapy.Item):
 class UserInfoItem(scrapy.Item):
     # 用户信息
     # NOTE: 访问“http://weibo.com/2887339314/”会直接转到“http://weibo.com/drwujun”，也就是其个人主页
+    raw_html = Field() # 保存原始数据
+    
     uid = Field() # 举例：http://weibo.com/2887339314/info
     page_id = Field() # 举例：http://weibo.com/p/1035052887339314
     

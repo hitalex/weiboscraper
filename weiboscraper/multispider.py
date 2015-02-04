@@ -39,11 +39,20 @@ def setup_crawler(spider_name, index, username, passwd):
     crawler.crawl(spider)
     reactor_control.add_crawler()
     crawler.start()
+    
+    import time
+    time.sleep(5)
     log.msg('Crawler %d started...' % index, log.INFO)
     
 if __name__ == '__main__':
+    import sys
+    if len(sys.argv) < 2:
+        print 'python %s <uid-list-path>' % sys.argv[1]
+        sys.exit(0)
+        
+    uid_list_path = sys.argv[1]
     # 初始化全局变量
-    global_vars.init()
+    global_vars.init(uid_list_path)
     
     spider_name = 'userinfo'
     

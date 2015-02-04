@@ -75,8 +75,12 @@ class UserInfoSpider(scrapy.Spider):
         self.crawler.stats.inc_value('response_received')
         # 设置随机等待的时间: 假设等待时间服从Possion分布
         sec = np.random.poisson(10) # 平均值为10, 再加上scrapy的等待时间5 sec
-        #log.msg('Sleep for %s secs.' % sec, log.INFO)
-        #time.sleep(sec)
+        log.msg('Sleep for %s secs.' % sec, log.INFO)
+        time.sleep(sec)
+        
+    def item_scraped(self):
+        # 增加item统计数
+        self.crawler.stats.inc_value('item_scraped')
         
     def make_request_list(self, num_request = 1):
         """ 根据当前的情况生成request的list
@@ -84,8 +88,19 @@ class UserInfoSpider(scrapy.Spider):
         # 得到关于request处理的统计数据
         num_response_received= self.crawler.stats.get_value('response_received')
         num_request_issued = self.crawler.stats.get_value('request_issued')
-        num_request_left = num_request_issued - num_response_received # 该值可能为负值
-        log.msg('Request issued: %d, response received: %d, left: %d' % (num_request_issued, num_response_received, num_request_left), log.DEBUG)
+        num_item_scraped = self.crawler.stats.get_value('item_scraped')
+        num_item_response_processed = self.crawler.stats.get_value('item_response_processed')
+        
+        #num_request_left = num_request_issued - num_response_received # 该值可能为负值
+        #log.msg('Request issued: %d, response received: %d, left: %d' % (num_request_issued, num_response_received, num_request_left), log.DEBUG)
+        
+        # 一个request对应一个item
+        # 如果某个request不对应一个item抓取，则可以不增加 request_issued的值
+        #num_request_left = num_request_issued - num_item_scraped # 该值可能为负值
+        #log.msg('Request issued: %d, item scraped: %d, left: %d' % (num_request_issued, num_item_scraped, num_request_left), log.DEBUG)
+        
+        num_request_left = num_request_issued - num_item_response_processed
+        log.msg('Request issued: %d, item response processed: %d, left: %d' % (num_request_issued, num_item_response_processed, num_request_left), log.DEBUG)
         
         log.msg('Current uidlist count: %d' % (global_vars.current_uidlist_count), log.DEBUG)
         
@@ -145,8 +160,13 @@ class UserInfoSpider(scrapy.Spider):
             self.crawler.stats.set_value('request_issued', 0)
             # register some signals
             self.crawler.stats.set_value('response_received', 0)
+            self.crawler.stats.set_value('item_scraped', 0)
+            self.crawler.stats.set_value('item_response_processed', 0)
+
             # 记录收到的response的数量
             dispatcher.connect(self.response_received, signals.response_received)
+            # 记录已经抓取的item的数量
+            dispatcher.connect(self.item_scraped, signals.item_scraped)
             
             request_list = self.make_request_list(num_request = 1)
             # 将一些uid加入初始抓取的列表
@@ -160,13 +180,13 @@ class UserInfoSpider(scrapy.Spider):
     def parse_user_card_info(self, response):
         """ 解析用户和机构的信息
         """
+        self.crawler.stats.inc_value('item_response_processed')
         # 增加request
-        """
-        request_list = self.make_request_list()
+        request_list = self.make_request_list(5)
         for request in request_list:
             self.crawler.stats.inc_value('request_issued')
             yield request
-        """
+        
         log.msg('In spider %d - Parsing response url: %s' % (self.spider_index, response.url), log.DEBUG)
             
         m = re_UserCardAjax.search(response.body)
@@ -190,6 +210,7 @@ class UserInfoSpider(scrapy.Spider):
         NOTE: 将该解析单独作为一个函数有两个作用：1）便于单独测试；2）使得parse_user_card_info函数结构清晰
         """
         user_info_item = UserInfoItem()
+        user_info_item['raw_html'] = html_data # 保存所有的原始数据
         user_info_item['uid'] = uid
         
         soup = beautiful_soup(html_data)
