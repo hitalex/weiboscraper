@@ -39,9 +39,6 @@ def setup_crawler(spider_name, index, username, passwd):
     crawler.crawl(spider)
     reactor_control.add_crawler()
     crawler.start()
-    
-    import time
-    time.sleep(5)
     log.msg('Crawler %d started...' % index, log.INFO)
     
 if __name__ == '__main__':

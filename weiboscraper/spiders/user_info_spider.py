@@ -74,7 +74,7 @@ class UserInfoSpider(scrapy.Spider):
     def response_received(self):
         self.crawler.stats.inc_value('response_received')
         # 设置随机等待的时间: 假设等待时间服从Possion分布
-        sec = np.random.poisson(10) # 平均值为10, 再加上scrapy的等待时间5 sec
+        sec = np.random.poisson(1) # 平均值为10, 再加上scrapy的等待时间5 sec
         log.msg('Sleep for %s secs.' % sec, log.INFO)
         time.sleep(sec)
         
@@ -267,14 +267,15 @@ class UserInfoSpider(scrapy.Spider):
         user_info_item['n_weibo'] = parse_number(weibo_text)
         
         user_info_list = nc_content.find_all('li', attrs={'class':'info_li'})
-        user_info_item['location'] = user_info_list[0].a['title']
-        if len(user_info_list) >= 2:
-            if user_info_list[1].text.find(u'毕业于') >= 0:
-                user_info_item['edu'] = user_info_list[1].a['title']
-                if len(user_info_list) >= 3:
-                    user_info_item['work'] = user_info_list[2].a['title']
-            else:
-                user_info_item['work'] = user_info_list[1].a['title']
+        if len(user_info_list) >= 1: # 有可能用户card不含有location信息，如：http://weibo.com/1947597977/info
+            user_info_item['location'] = user_info_list[0].a['title']
+            if len(user_info_list) >= 2:
+                if user_info_list[1].text.find(u'毕业于') >= 0:
+                    user_info_item['edu'] = user_info_list[1].a['title']
+                    if len(user_info_list) >= 3:
+                        user_info_item['work'] = user_info_list[2].a['title']
+                else:
+                    user_info_item['work'] = user_info_list[1].a['title']
         
         return user_info_item
 
