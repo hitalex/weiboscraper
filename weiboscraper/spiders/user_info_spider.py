@@ -181,6 +181,7 @@ class UserInfoSpider(scrapy.Spider):
         """ 解析用户和机构的信息
         """
         self.crawler.stats.inc_value('item_response_processed')
+        # TODO: 检查是否被封，登录是否过期
         # 增加request
         request_list = self.make_request_list(5)
         for request in request_list:
@@ -197,6 +198,7 @@ class UserInfoSpider(scrapy.Spider):
             json_data = json.loads(json_str)
             uid = response.meta['uid']
             if json_data['code'] != '100000':
+                # TODO: 记录失败的uid列表
                 log.msg('Error in response, uid: %s, msg: %s' % (uid, json_data['msg']), log.ERROR)
             else:
                 html_data = json_data['data']
