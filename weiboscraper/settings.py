@@ -41,6 +41,7 @@ USER_NAME = 'cola_weibo8@163.com'
 USER_PASS = '31415926'
 
 WEIBO_USER_ACCOUNTS = [
+    {'username': 'cola_weibo2@163.com', 'passwd':'31415926'},
 	{'username': 'cola_weibo6@163.com', 'passwd':'31415926'},
 	{'username': 'cola_weibo7@163.com', 'passwd':'31415926'},
 	{'username': 'cola_weibo8@163.com', 'passwd':'31415926'},
