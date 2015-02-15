@@ -5,8 +5,8 @@ def beautiful_soup(html, logger=None):
     try:
         from bs4 import BeautifulSoup, FeatureNotFound
     except ImportError:
-        raise DependencyNotInstalledError("BeautifulSoup4")
-    
+        #raise DependencyNotInstalledError("BeautifulSoup4")
+        raise Exception("BeautifulSoup4")
     try:
         return BeautifulSoup(html, 'lxml')
     except FeatureNotFound:

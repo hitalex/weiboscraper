@@ -27,7 +27,7 @@ class UserInfoPipeline(object):
         if self.name not in getattr(spider, 'pipelines', []):
             return item
             
-        if (not 'n_follows' in item) or (not item['n_follows']):
+        if (not 'n_follows' in item) or (item['n_follows'] == None):
             raise DropItem('Incomplete item: %s' % item)
         
         #import ipdb; ipdb.set_trace()
