@@ -111,8 +111,13 @@ class UserInfoSpider(scrapy.Spider):
             while current_index < len(global_vars.UID_LIST) and len(request_list) < num_request:
                 uid = global_vars.UID_LIST[current_index]
                 # 检查数据库中是否已经存在该uid
-                cur = self.collection.find({'uid':uid})
-                if cur.count() > 0:
+                #cur = self.collection.find({'uid':uid})
+                #if cur.count() > 0:
+                #    current_index += 1
+                #    continue
+                
+                # 直接查询set，提高数据库查询速度                    
+                if uid in global_vars.CURRENT_ALL_USER_SET:
                     current_index += 1
                     continue
                 
