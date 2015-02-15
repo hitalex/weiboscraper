@@ -18,6 +18,9 @@ class UserInfoItem(scrapy.Item):
     # NOTE: 访问“http://weibo.com/2887339314/”会直接转到“http://weibo.com/drwujun”，也就是其个人主页
     raw_html = Field() # 保存原始数据
     
+    # 该用户是否还存在: False, 该用户已经不存在，True（默认值）该用户还存在
+    existed = Field()
+    
     uid = Field() # 举例：http://weibo.com/2887339314/info
     page_id = Field() # 举例：http://weibo.com/p/1035052887339314
     

@@ -197,15 +197,22 @@ class UserInfoSpider(scrapy.Spider):
             json_str = m.group(1)            
             json_data = json.loads(json_str)
             uid = response.meta['uid']
-            if json_data['code'] != '100000':
-                # TODO: 记录失败的uid列表
-                log.msg('Error in response, uid: %s, msg: %s' % (uid, json_data['msg']), log.ERROR)
-            else:
+            if json_data['code'] == '100000':
                 html_data = json_data['data']
                 user_info_item = self.parse_user_card_info_text(uid, html_data)
                 log.msg('Sucess in crawling user: %s' % user_info_item['uid'])
                 #print user_info_item
                 yield user_info_item
+            elif json_data['code'] == '100001':
+                # 该用户已经不存在，但是仍然记录在数据库中
+                user_info_item = UserInfoItem()
+                user_info_item['uid'] = uid
+                user_info_item['existed'] = False
+                log.msg('uid: %s dose not exist anymore!' % (uid), log.INFO)
+                yield user_info_item
+            else:
+                # TODO: 记录失败的uid列表
+                log.msg('Error in response, uid: %s, msg: %s' % (uid, json_data['msg']), log.ERROR)
         
     def parse_user_card_info_text(self, uid, html_data):
         """ 给定html body解析 user info, 用户信息包括：avatar, uid, nickname, desc, location
@@ -214,6 +221,7 @@ class UserInfoSpider(scrapy.Spider):
         user_info_item = UserInfoItem()
         #user_info_item['raw_html'] = html_data # 保存所有的原始数据
         user_info_item['uid'] = uid
+        user_info_item['existed'] = True
         
         soup = beautiful_soup(html_data)
         
