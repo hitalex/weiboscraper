@@ -212,7 +212,7 @@ class UserInfoSpider(scrapy.Spider):
         NOTE: 将该解析单独作为一个函数有两个作用：1）便于单独测试；2）使得parse_user_card_info函数结构清晰
         """
         user_info_item = UserInfoItem()
-        user_info_item['raw_html'] = html_data # 保存所有的原始数据
+        #user_info_item['raw_html'] = html_data # 保存所有的原始数据
         user_info_item['uid'] = uid
         
         soup = beautiful_soup(html_data)
